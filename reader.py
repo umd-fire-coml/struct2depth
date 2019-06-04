@@ -64,7 +64,7 @@ class DataReader(object):
     with tf.name_scope('data_loading'):
       with tf.name_scope('enqueue_paths'):
         seed = random.randint(0, 2**31 - 1)
-        self.file_lists = self.compile_file_list(self.data_dir, self.input_file)
+        self.file_lists = self.compile_file_list(self.data_dir)
         image_paths_queue = tf.train.string_input_producer(
             self.file_lists['image_file_list'], seed=seed,
             shuffle=self.shuffle,
@@ -286,38 +286,21 @@ class DataReader(object):
     im, seg, intrinsics = crop_randomly(im, seg, intrinsics, out_h, out_w)
     return im, seg, intrinsics
 
-  def compile_file_list(self, data_dir, split, load_pose=False):
-    """Creates a list of input files."""
-    logging.info('data_dir: %s', data_dir)
-    with gfile.Open(os.path.join(data_dir, '%s.txt' % split), 'r') as f:
-      frames = f.readlines()
-      frames = [k.rstrip() for k in frames]
-    subfolders = [x.split(' ')[0] for x in frames]
-    frame_ids = [x.split(' ')[1] for x in frames]
-    image_file_list = [
-        os.path.join(data_dir, subfolders[i], frame_ids[i] + '.' +
-                     self.file_extension)
-        for i in range(len(frames))
-    ]
-    segment_file_list = [
-        os.path.join(data_dir, subfolders[i], frame_ids[i] + '-fseg.' +
-                     self.file_extension)
-        for i in range(len(frames))
-    ]
-    cam_file_list = [
-        os.path.join(data_dir, subfolders[i], frame_ids[i] + '_cam.txt')
-        for i in range(len(frames))
-    ]
+  def compile_file_list(self, data_dir):
+    """Creates a list of input files from a data directory
+    data_dir: Directory containing images, segmentations, and calibration information"""
+    
+    SUBFOLDERS = ['image_2', 'image_2_seg', 'calib']
+    
+    image_file_list = [os.path.join(data_dir, SUBFOLDERS[0], str(i) + '.' + self.file_extension) for i in range(7841)]
+    segment_file_list = [os.path.join(data_dir, SUBFOLDERS[1], str(i) + '.' + self.file_extension) for i in range(7841)]
+    cam_file_list = [os.path.join(data_dir, SUBFOLDERS[2], str(i) + '.txt') for i in range(7841)]
+    
     file_lists = {}
     file_lists['image_file_list'] = image_file_list
     file_lists['segment_file_list'] = segment_file_list
     file_lists['cam_file_list'] = cam_file_list
-    if load_pose:
-      pose_file_list = [
-          os.path.join(data_dir, subfolders[i], frame_ids[i] + '_pose.txt')
-          for i in range(len(frames))
-      ]
-      file_lists['pose_file_list'] = pose_file_list
+    
     self.steps_per_epoch = len(image_file_list) // self.batch_size
     return file_lists
 
