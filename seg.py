@@ -35,13 +35,15 @@ CLASS_NAMES = ['BG', 'person', 'bicycle', 'car', 'motorcycle', 'airplane',
                'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors',
                'teddy bear', 'hair drier', 'toothbrush']
 NON_MOVING_CLASSES = [10, 11, 12, 13, 14]
-    
+MAX_COLORS = 30    
     
 class SegGen(object):
     
-    def __init__(self):
+    def __init__(self, seq_length):
         # Directory to save logs and trained model
         self.MODEL_DIR = os.path.join(ROOT_DIR, "logs")
+        self.colors = visualize.random_colors(MAX_COLORS)
+        self.seq_length = seq_length
         
         # Local path to trained weights file
         self.COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
@@ -53,14 +55,14 @@ class SegGen(object):
             # Set batch size to 1 since we'll be running inference on
             # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
             GPU_COUNT = 1
-            IMAGES_PER_GPU = 1
+            IMAGES_PER_GPU = self.seq_length
 
         self.config = _InferenceConfig()
 
         K = keras.backend.backend()
         if K=='tensorflow':
             keras.backend.set_image_dim_ordering('tf')
-
+            
 
         # Create model object in inference mode.
         self.model = modellib.MaskRCNN(mode="inference", model_dir=self.MODEL_DIR, config=self.config)
@@ -68,22 +70,59 @@ class SegGen(object):
         # Load weights trained on MS-COCO
         self.model.load_weights(self.COCO_MODEL_PATH, by_name=True)
         
+    def IOU(self,box1, box2):
+        x_overlap = max(0, min(box1[3], box2[3]) - max(box1[1], box2[1]));
+        y_overlap = max(0, min(box1[2], box2[2]) - max(box1[0], box2[0]));
+        interArea = x_overlap * y_overlap;
+        unionArea = (box1[3] - box1[1]) * (box1[2] - box1[0]) + (box2[3] - box2[1]) * (box2[2] - box2[0]) - interArea
+        return interArea / unionArea
         
-    def generate_segmentation(self, image):
-        results = self.model.detect([image], verbose=1)
         
-        r = results[0]
-        class_ids = r['class_ids']
-        masks = r['masks']
-        masks = masks.astype(int)
+    def generate_segmentation(self, images):
+        """images is an array of images: shape (seq_length, H, W, 3). Order will be current, -1, -2"""
+        if (len(images) != self.seq_length):
+            print("Wrong length of images - it must match the sequence length used to instantiate the class")
+            return
+        
+        color_map = {}
+        segs = []
+        results = self.model.detect(images, verbose=1)
+        
+        for k in range(len(results)):
+            
+            class_ids = results[k]['class_ids']
+            boxes = results[k]['rois']
+            masks = results[k]['masks']
+            masks = masks.astype(int)
 
-        for i in range(len(class_ids)):
-            if class_ids[i] in NON_MOVING_CLASSES:
-                masks[:,:,i] = np.zeros((len(masks), len(masks[0])))
+            for i in range(len(class_ids)):
+                if class_ids[i] in NON_MOVING_CLASSES:
+                    masks[:,:,i] = np.zeros((len(masks), len(masks[0])))
 
-        colors = visualize.random_colors(len(class_ids))
-        seg = np.zeros((len(masks), len(masks[0]), 3), dtype=np.uint32)
-        for i in range(len(class_ids)):
-            seg = visualize.apply_mask(seg, masks[:,:,i], colors[i])
+
+            seg = np.zeros((len(masks), len(masks[0]), 3))
+            
+            #This is the base image
+            if k == 0:
+                for i in range(len(class_ids)):
+                    seg = visualize.apply_mask(seg, masks[:,:,i], self.colors[i])
+                    color_map[i] = boxes[i]
+            else:
+                for i in range(len(class_ids)):
+                    
+                    color = -1
+                    for j in range(len(color_map)):
+                        if self.IOU(color_map[j], boxes[i]) >= 0.5:
+                            color = self.colors[j]
+                            color_map[j] = boxes[i]
+                            
+                    if color == -1:
+                        color_map[len(color_map)] = boxes[i]
+                        color = self.colors[len(color_map)]
+                    
+                    seg = visualize.apply_mask(seg, masks[:,:,i], color)
+                    
+                    
+            segs.append(seg)
         
-        return seg
+        return segs

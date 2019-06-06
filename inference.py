@@ -26,14 +26,13 @@
 #    --depth \
 #    --egomotion true \
 
-
-
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
 import os
 from absl import app
+from functools import reduce #Necessary addition to imports:
 from absl import flags
 from absl import logging
 #import matplotlib.pyplot as plt
@@ -43,9 +42,9 @@ import fnmatch
 import tensorflow as tf
 import nets
 import util
+
 gfile = tf.gfile
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import axes3d, Axes3D
+
 # CMAP = 'plasma'
 
 INFERENCE_MODE_SINGLE = 'single'  # Take plain single-frame input.
@@ -123,98 +122,7 @@ FLAGS = flags.FLAGS
 
 flags.mark_flag_as_required('output_dir')
 flags.mark_flag_as_required('model_ckpt')
-"""
-    Funkcja zwracająca macierz transformacji dla vektora parametrów translacji i rotacji.
-    Paramtery:
-    - vec - wektor parametrów translacji i rotacji
-    - batch_size - ilość obrabianych w danym momencie parametrów
-    Return:
-    - macierz transformacji
-"""
-def _egomotion_vec2mat(vec, batch_size):
-  """Converts 6DoF transform vector to transformation matrix.
 
-  Args:
-    vec: 6DoF parameters [tx, ty, tz, rx, ry, rz] -- [B, 6].
-    batch_size: Batch size.
-
-  Returns:
-    A transformation matrix -- [B, 4, 4].
-  """
-  translation = tf.slice(vec, [0, 0], [-1, 3])
-  translation = tf.expand_dims(translation, -1)
-  rx = tf.slice(vec, [0, 3], [-1, 1])
-  ry = tf.slice(vec, [0, 4], [-1, 1])
-  rz = tf.slice(vec, [0, 5], [-1, 1])
-  rot_mat = _euler2mat(rz, ry, rx)
-  rot_mat = tf.squeeze(rot_mat, squeeze_dims=[1])
-  filler = tf.constant([0.0, 0.0, 0.0, 1.0], shape=[1, 1, 4])
-  filler = tf.tile(filler, [batch_size, 1, 1])
-  transform_mat = tf.concat([rot_mat, translation], axis=2)
-  transform_mat = tf.concat([transform_mat, filler], axis=1)
-  return transform_mat
-"""
-    Funkcja konwertująca kąty eluera na macierz rotacji
-    Paramtery:
-    - x - rotacja po osi x
-    - y - rotacja po osi y
-    - z - rotacja po osi z
-    Return:
-    - macierz rotacji
-"""
-def _euler2mat(z, y, x):
-  """Converts euler angles to rotation matrix.
-
-   From:
-   https://github.com/pulkitag/pycaffe-utils/blob/master/rot_utils.py#L174
-
-   TODO: Remove the dimension for 'N' (deprecated for converting all source
-   poses altogether).
-
-  Args:
-    z: rotation angle along z axis (in radians) -- size = [B, n]
-    y: rotation angle along y axis (in radians) -- size = [B, n]
-    x: rotation angle along x axis (in radians) -- size = [B, n]
-
-  Returns:
-    Rotation matrix corresponding to the euler angles, with shape [B, n, 3, 3].
-  """
-  batch_size = tf.shape(z)[0]
-  n = 1
-  z = tf.clip_by_value(z, -np.pi, np.pi)
-  y = tf.clip_by_value(y, -np.pi, np.pi)
-  x = tf.clip_by_value(x, -np.pi, np.pi)
-
-  # Expand to B x N x 1 x 1
-  z = tf.expand_dims(tf.expand_dims(z, -1), -1)
-  y = tf.expand_dims(tf.expand_dims(y, -1), -1)
-  x = tf.expand_dims(tf.expand_dims(x, -1), -1)
-
-  zeros = tf.zeros([batch_size, n, 1, 1])
-  ones = tf.ones([batch_size, n, 1, 1])
-
-  cosz = tf.cos(z)
-  sinz = tf.sin(z)
-  rotz_1 = tf.concat([cosz, -sinz, zeros], axis=3)
-  rotz_2 = tf.concat([sinz, cosz, zeros], axis=3)
-  rotz_3 = tf.concat([zeros, zeros, ones], axis=3)
-  zmat = tf.concat([rotz_1, rotz_2, rotz_3], axis=2)
-
-  cosy = tf.cos(y)
-  siny = tf.sin(y)
-  roty_1 = tf.concat([cosy, zeros, siny], axis=3)
-  roty_2 = tf.concat([zeros, ones, zeros], axis=3)
-  roty_3 = tf.concat([-siny, zeros, cosy], axis=3)
-  ymat = tf.concat([roty_1, roty_2, roty_3], axis=2)
-
-  cosx = tf.cos(x)
-  sinx = tf.sin(x)
-  rotx_1 = tf.concat([ones, zeros, zeros], axis=3)
-  rotx_2 = tf.concat([zeros, cosx, -sinx], axis=3)
-  rotx_3 = tf.concat([zeros, sinx, cosx], axis=3)
-  xmat = tf.concat([rotx_1, rotx_2, rotx_3], axis=2)
-
-  return tf.matmul(tf.matmul(xmat, ymat), zmat)
 
 def _run_inference(output_dir=None,
                    file_extension='png',
@@ -318,8 +226,6 @@ def _run_inference(output_dir=None,
           im_batch = []
 
     # Run egomotion network.
-    "Wektor zawierajacy wyliczane przemieszczenia kamery"
-    egomotion_tuple = []
     if egomotion:
       if inference_mode == INFERENCE_MODE_SINGLE:
         # Run regular egomotion inference loop.
@@ -327,7 +233,6 @@ def _run_inference(output_dir=None,
         input_seg_seq = []
         current_sequence_dir = None
         current_output_handle = None
-        "Wczytywanie odpowiedniej sekwencji zdjęć"
         for i in range(len(im_files)):
           sequence_dir = os.path.dirname(im_files[i])
           if sequence_dir != current_sequence_dir:
@@ -366,28 +271,15 @@ def _run_inference(output_dir=None,
           if use_masks:
             input_image_stack = mask_image_stack(input_image_stack,
                                                  input_seg_seq)
-          "Wyliczanie przekształceń pozycji kamery"
-          est_egomotion_ns = inference_model.inference_egomotion(
-                input_image_stack, sess)
-          est_egomotion_s = np.squeeze(inference_model.inference_egomotion(
+          est_egomotion = np.squeeze(inference_model.inference_egomotion(
               input_image_stack, sess))
-          "Zapisywanie przekształceń do listy przekształceń"
-          if i == 2:
-            egomotion_tuple = est_egomotion_ns[0, 0, :]
-            egomotion_tuple = np.expand_dims(egomotion_tuple, axis=0)
-          else:
-            buff = est_egomotion_ns[0, 0, :]
-            buff = np.expand_dims(buff, axis=0)
-            egomotion_tuple = np.concatenate((egomotion_tuple,buff ), axis=0)
           egomotion_str = []
-          "Zapis przkeształceń do pliku *txt"
           for j in range(seq_length - 1):
-            egomotion_str.append(','.join([str(d) for d in est_egomotion_s[j]]))
+            egomotion_str.append(','.join([str(d) for d in est_egomotion[j]]))
           current_output_handle.write(
               str(i) + ' ' + ' '.join(egomotion_str) + '\n')
         if current_output_handle is not None:
           current_output_handle.close()
-
       elif inference_mode == INFERENCE_MODE_TRIPLETS:
         written_before = []
         for i in range(len(im_files)):
@@ -422,102 +314,6 @@ def _run_inference(output_dir=None,
             current_output_handle.write(str(i) + ' ' + egomotion_1_2 + ' ' +
                                         egomotion_2_3 + '\n')
           written_before.append(output_filepath)
-      "Konwertowanie listy przekształceń z numpy na tensor"
-      egomotion_tuple = np.expand_dims(egomotion_tuple, axis=0)
-      tf.reset_default_graph()
-      egomotion_tensor = tf.convert_to_tensor(egomotion_tuple, dtype=tf.float32)
-      "Inicjalizacja zmiennych"
-      start_position = np.array([0, 0, 0, 1])#Pozycja początkowa
-      actual_position = start_position #Aktulalna pozycja
-      position_x_vec = []#Wektory pozycji (przmeiszczeń)
-      position_y_vec = []
-      position_z_vec = []
-      position_x_vec = np.append(position_x_vec, actual_position[0])
-      position_y_vec = np.append(position_y_vec, actual_position[1])
-      position_z_vec = np.append(position_z_vec, actual_position[2])
-      actual_transform_matrix = []#Aktualna macierz transformacji
-      position_str =[] #Zawiera tekst służący do zapisu danych do pliku *txt
-      matrix_transform_str = []
-      ego_str = []
-      for i in range(0, len(im_files)-2):
-        transform_buff =[]#Zmienna bufurująca
-        if i == 0: #Generowanie macierzy transformacji dla pierwszje iteracji
-            actual_transform_matrix = _egomotion_vec2mat(egomotion_tensor[:, i, :], 1)
-            ego_str.append(str(egomotion_tuple[0, i, 0]) + "," + str(egomotion_tuple[0, i, 1]) + "," + str(egomotion_tuple[0, i, 2])
-                           + "," + str(egomotion_tuple[0, i, 3]) + "," + str(egomotion_tuple[0, i, 4]) + "," + str(egomotion_tuple[0, i, 5]) + "\n")
-        else: #Generowanie macierzy transformacji dla sekwencji 1-2, 2-3 itd. Mnożenie jej przez transformacje zabuforowaną, wcześniejszą.
-            transform_matrix = _egomotion_vec2mat(egomotion_tensor[:, i, :], 1)
-            ego_str.append(str(egomotion_tuple[0, i, 0]) + "," + str(egomotion_tuple[0, i, 1]) + "," + str(
-                egomotion_tuple[0, i, 2])
-                           + "," + str(egomotion_tuple[0, i, 3]) + "," + str(egomotion_tuple[0, i, 4]) + "," + str(
-                egomotion_tuple[0, i, 5]) + "\n")#Zapis do listy tekstowej wartości przekształceń
-            actual_transform_matrix = tf.matmul(actual_transform_matrix, transform_matrix)#Aktualna macierz transformacji
-            transform_buff = actual_transform_matrix#Konwetowanie macierzy na wersję numpy
-            sess = tf.Session()
-            numpy_matrix_transform = sess.run(transform_buff)
-            numpy_matrix_transform = np.squeeze(numpy_matrix_transform, axis=0)
-            actual_position = np.dot(numpy_matrix_transform, start_position)
-            position_x_vec = np.append(position_x_vec, actual_position[0])#Zapis pozycji
-            position_y_vec = np.append(position_y_vec, actual_position[1])
-            position_z_vec = np.append(position_z_vec, actual_position[2])
-            print("Rotation and translation matrix from picture " + str(0) + " to " + str(i))#Informacje konsolowe
-            print(numpy_matrix_transform)
-            print("Actual position of camera")
-            print(actual_position)
-            "Przygotowywanie wektora tekstu do zapisu (pozycji i wyiczonych macierzy transformacj)"
-            position_str.append(str(actual_position[0]) + "," + str(actual_position[1]) + "," + str(actual_position[2]) + "\n")
-
-            matrix_transform_str.append( str(numpy_matrix_transform[0,0]) + "," + str(numpy_matrix_transform[0,1]) + ","+str(numpy_matrix_transform[0,2]) +\
-                           "," + str(numpy_matrix_transform[0, 3])+ ","+str(numpy_matrix_transform[1,0])+ ","+str(numpy_matrix_transform[1,1]) +\
-                           "," + str(numpy_matrix_transform[1, 2])+ ","+str(numpy_matrix_transform[1,3])+ ","+str(numpy_matrix_transform[2,0]) +\
-                           "," + str(numpy_matrix_transform[2, 1])+ ","+str(numpy_matrix_transform[2,2])+ ","+str(numpy_matrix_transform[2,3]) +\
-                           "," + str(numpy_matrix_transform[3, 0])+ ","+str(numpy_matrix_transform[3,1])+ ","+str(numpy_matrix_transform[3,2]) +\
-                           "," + str(numpy_matrix_transform[3, 3]) + "\n")
-      vectime = []
-      "Generowanie wektora czasu"
-      for i in range(0, len(im_files) - 2):
-          vectime = np.append(vectime,i)
-
-      "Zapis do pliku pozycji, macierzy transformacji, wartości przekształceń oraz zapis wykresów"
-      file = open(output_dir + "/Position.txt", "w")
-      for i in range(0, len(im_files) - 4):
-        file.write(position_str[i])
-      file.close()
-      file = open(output_dir + "/Transform_matrix.txt", "w")
-      for i in range(0, len(im_files) - 4):
-          file.write(matrix_transform_str[i])
-      file.close()
-      file = open(output_dir + "/Egomotion_value.txt", "w")
-      for i in range(0, len(im_files) - 4):
-          file.write(ego_str[i])
-      file.close()
-      print("Plotting xt figure")
-      fig_xyz = plt.figure()
-      ax = fig_xyz.add_subplot(111)
-      ax.plot(vectime,position_x_vec)
-      fig_xyz.suptitle('Wykres pozycji X od czasu', fontsize=20)
-      ax.set_xlabel('T')
-      ax.set_ylabel('X')
-      plt.savefig(output_dir + '/XT.png', dpi=200)
-      plt.close()
-      print("Plotting yt figure")
-      fig_xyz = plt.figure()
-      ax = fig_xyz.add_subplot(111)
-      ax.plot(  vectime,position_y_vec)
-      fig_xyz.suptitle('Wykres pozycji Y od czasu', fontsize=20)
-      ax.set_xlabel('T')
-      ax.set_ylabel('Y')
-      plt.savefig(output_dir + '/YT.png', dpi=200)
-      plt.close()
-      print("Plotting zt figure")
-      fig_xyz = plt.figure()
-      ax = fig_xyz.add_subplot(111)
-      ax.plot(vectime, position_z_vec)
-      fig_xyz.suptitle('Wykres pozycji Z od czasu', fontsize=20)
-      ax.set_xlabel('T')
-      ax.set_ylabel('Z')
-      plt.savefig(output_dir + '/ZT.png', dpi=200)
-      plt.close()
       logging.info('Done.')
 
 
