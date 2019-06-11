@@ -35,7 +35,7 @@ CLASS_NAMES = ['BG', 'person', 'bicycle', 'car', 'motorcycle', 'airplane',
                'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors',
                'teddy bear', 'hair drier', 'toothbrush']
 NON_MOVING_CLASSES = [10, 11, 12, 13, 14]
-MAX_COLORS = 30    
+MAX_COLORS = 50    
     
 class SegGen(object):
     

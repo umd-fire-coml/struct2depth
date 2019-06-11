@@ -6,6 +6,9 @@ import seg
 import tensorflow as tf
 import sys
 
+gpu_options = tf.GPUOptions(allow_growth=True)
+session = tf.InteractiveSession(config=tf.ConfigProto(gpu_options=gpu_options))
+
 class PreProcessor():
     def __init__(self,input_dir, output_dir):
         # Define global constant
@@ -46,10 +49,10 @@ class PreProcessor():
         # get a list of png imag
         curr_img_list: list = glob.glob(self.input_dir+"image_2/*.png")
         curr_img_list = sorted(curr_img_list)
+        segger = seg.SegGen(self.SEQ_LENGTH) 
 
-        for i in range(len(curr_img_list)): #len(curr_img_list)
+        for i in range(826, 7481): #len(curr_img_list)
             # creating segmentation object
-            segger = seg.SegGen(self.SEQ_LENGTH) 
             # create a list that will contains all frames in resized form (np array)
             frame_list = [] 
             # creating a large image
