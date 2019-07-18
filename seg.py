@@ -10,7 +10,7 @@ import keras.backend
 # Root directory of the project
 ROOT_DIR = "Mask_RCNN_master"
 # Import Mask RCNN
-from Mask_RCNN_master.mrcnn import utils
+import Mask_RCNN_master.mrcnn.utils as utils
 import Mask_RCNN_master.mrcnn.model as modellib
 from Mask_RCNN_master.mrcnn import visualize
 # Import COCO config

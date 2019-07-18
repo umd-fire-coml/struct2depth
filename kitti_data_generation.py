@@ -51,7 +51,7 @@ class PreProcessor():
         curr_img_list = sorted(curr_img_list)
         segger = seg.SegGen(self.SEQ_LENGTH) 
 
-        for i in range(826, 7481): #len(curr_img_list)
+        for i in range(0, 7481): #len(curr_img_list)
             # creating segmentation object
             # create a list that will contains all frames in resized form (np array)
             frame_list = [] 
